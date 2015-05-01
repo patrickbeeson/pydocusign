@@ -4,13 +4,11 @@ from io import BytesIO
 import json
 import logging
 import os
-
-import certifi
-import pycurl
 import requests
 
 from pydocusign import exceptions
 
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ class DocuSignClient(object):
         #: environment variable, if available, is used.
         self.root_url = root_url
         if not self.root_url:
-            self.root_url = os.environ.get('DOCUSIGN_ROOT_URL', '')
+            self.root_url = settings.DOCUSIGN_ROOT_URL
 
         #: API username.
         #:
@@ -43,7 +41,7 @@ class DocuSignClient(object):
         #: environment variable, if available, is used.
         self.username = username
         if not self.username:
-            self.username = os.environ.get('DOCUSIGN_USERNAME', '')
+            self.username = settings.DOCUSIGN_USERNAME
 
         #: API password.
         #:
@@ -51,7 +49,7 @@ class DocuSignClient(object):
         #: environment variable, if available, is used.
         self.password = password
         if not self.password:
-            self.password = os.environ.get('DOCUSIGN_PASSWORD', '')
+            self.password = settings.DOCUSIGN_PASSWORD
 
         #: API integrator key.
         #:
@@ -60,8 +58,7 @@ class DocuSignClient(object):
         #: used.
         self.integrator_key = integrator_key
         if not self.integrator_key:
-            self.integrator_key = os.environ.get('DOCUSIGN_INTEGRATOR_KEY',
-                                                 '')
+            self.integrator_key = settings.DOCUSIGN_INTEGRATOR_KEY
         #: API account ID.
         #: This attribute can be guessed via :meth:`login_information`.
         #:
@@ -69,7 +66,7 @@ class DocuSignClient(object):
         #: environment variable, if available, is used.
         self.account_id = account_id
         if not self.account_id:
-            self.account_id = os.environ.get('DOCUSIGN_ACCOUNT_ID', '')
+            self.account_id = settings.DOCUSIGN_ACCOUNT_ID
 
         #: API AppToken.
         #:
@@ -77,7 +74,7 @@ class DocuSignClient(object):
         #: environment variable, if available, is used.
         self.app_token = app_token
         if not self.app_token:
-            self.app_token = os.environ.get('DOCUSIGN_APP_TOKEN', '')
+            self.app_token = settings.DOCUSIGN_APP_TOKEN
 
         #: User's URL, i.e. the one mentioning :attr:`account_id`.
         #: This attribute can be guessed via :meth:`login_information`.
@@ -89,7 +86,7 @@ class DocuSignClient(object):
 
         # Connection timeout.
         if timeout is None:
-            timeout = float(os.environ.get('DOCUSIGN_TIMEOUT', 30))
+            timeout = float(settings.DOCUSIGN_TIMEOUT)
         self.timeout = timeout
 
     def get_timeout(self):
@@ -333,31 +330,17 @@ class DocuSignClient(object):
         ``create_envelope_from_template`` methods.
 
         """
-        c = pycurl.Curl()
-        c.setopt(pycurl.SSL_VERIFYPEER, 1)
-        c.setopt(pycurl.SSL_VERIFYHOST, 2)
         timeout_ms = int(self.timeout * 1000)
-        c.setopt(pycurl.CONNECTTIMEOUT_MS, timeout_ms)
-        c.setopt(pycurl.CAINFO, certifi.where())
-        c.setopt(pycurl.URL, parts['url'])
-        c.setopt(
-            pycurl.HTTPHEADER,
-            ['{key}: {value}'.format(key=key, value=value)
-             for (key, value) in parts['headers'].items()])
-        c.setopt(pycurl.VERBOSE, 0)
-        c.setopt(pycurl.POST, 1)
-        c.setopt(pycurl.POSTFIELDS, parts['body'])
-        response_body = BytesIO()
-        c.setopt(pycurl.WRITEFUNCTION, response_body.write)
-        c.perform()
-        response_body.seek(0)
-        response = Response(
-            status_code=c.getinfo(pycurl.HTTP_CODE),
-            text=response_body.read())
-        c.close()
-        if response.status_code != 201:
-            raise exceptions.DocuSignException(response)
-        response_data = json.loads(response.text)
+        url = parts['url']
+        payload = parts['body']
+        headers = [
+            '{key}: {value}'.format(key=key, value=value) for (key, value) in parts['headers'].items()]
+        r = requests.post(
+            url, headers=headers, data=payload, timeout=timeout_ms
+        )
+        if r.status_code != 201:
+            raise exceptions.DocuSignError('{}{}'.format(r.status_code, r.text))
+        response_data = json.loads(r.text)
         if not envelope.client:
             envelope.client = self
         if not envelope.envelopeId:
